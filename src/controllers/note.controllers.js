@@ -42,6 +42,7 @@ const createNote = asyncHandler(async (req, res) => {
 
 // --- GET NOTES FOR AUTHENTICATED USER (Updated for Filtering) ---
 const getNotes = asyncHandler(async (req, res) => {
+    console.log("BACKEND_DEBUG: getNotes controller has been triggered!");
     const userId = req.user._id;
 
     // 2. Get pagination and filter options
@@ -65,13 +66,14 @@ const getNotes = asyncHandler(async (req, res) => {
             query.notebook = new mongoose.Types.ObjectId(notebookId);
         }
     }
-
+ // ✅ ADD THIS LOG to see which user we are querying for
+ console.log(`DATABASE_QUERY: Searching for notes with owner ID: ${userId}`);
     // 4. Query notes with pagination and sorting
     const notes = await Note.find(query) 
         .sort({ createdAt: -1 }) 
         .skip(skip)               
         .limit(limit);            
-
+        console.log(`DATABASE_RESULT: Found ${notes.length} notes for this user.`);
     // 5. Get the total count of notes for the user, matching the current filter
     const totalNotes = await Note.countDocuments(query); 
 
@@ -127,9 +129,9 @@ const updateNote = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, note, "Note updated successfully."));
 });
 
-
 // --- DELETE NOTE ---
-const deleteNote = async (req, res) => {
+// ✅ WRAP THIS FUNCTION WITH asyncHandler
+const deleteNote = asyncHandler(async (req, res) => {
     const { noteId } = req.params;
     const userId = req.user?._id;
 
@@ -141,13 +143,11 @@ const deleteNote = async (req, res) => {
     if (result.deletedCount === 0) {
         throw new ApiError(404, "Note not found or you are not the owner.");
     }
-    return res.status(200).json({
-      success: true,
-      message: "Note deleted successfully."
-    });
-};
+    return res.status(200).json(new ApiResponse(200, {}, "Note deleted successfully."));
+});
 
-const deleteMultipleNotes = async (req, res) => {
+// ✅ WRAP THIS FUNCTION WITH asyncHandler
+const deleteMultipleNotes = asyncHandler(async (req, res) => {
     const { noteIds } = req.body;
     const userId = req.user?._id;
 
@@ -164,11 +164,51 @@ const deleteMultipleNotes = async (req, res) => {
         console.warn(`User ${userId} attempted to delete notes that did not exist or they did not own.`);
     }
 
-    return res.status(200).json({
-        success: true,
-        message: `${result.deletedCount} notes deleted successfully.`,
-    });
-};
+    return res.status(200).json(new ApiResponse(200, { deletedCount: result.deletedCount }, `${result.deletedCount} notes deleted successfully.`));
+});
+
+
+// // --- DELETE NOTE ---
+// const deleteNote = async (req, res) => {
+//     const { noteId } = req.params;
+//     const userId = req.user?._id;
+
+//     const result = await Note.deleteOne({
+//         _id: new mongoose.Types.ObjectId(noteId),
+//         owner: new mongoose.Types.ObjectId(userId),
+//     });
+
+//     if (result.deletedCount === 0) {
+//         throw new ApiError(404, "Note not found or you are not the owner.");
+//     }
+//     return res.status(200).json({
+//       success: true,
+//       message: "Note deleted successfully."
+//     });
+// };
+
+// const deleteMultipleNotes = async (req, res) => {
+//     const { noteIds } = req.body;
+//     const userId = req.user?._id;
+
+//     if (!noteIds || !Array.isArray(noteIds) || noteIds.length === 0) {
+//         throw new ApiError(400, "Note IDs are required.");
+//     }
+
+//     const result = await Note.deleteMany({
+//         _id: { $in: noteIds.map(id => new mongoose.Types.ObjectId(id)) },
+//         owner: new mongoose.Types.ObjectId(userId),
+//     });
+
+//     if (result.deletedCount === 0) {
+//         console.warn(`User ${userId} attempted to delete notes that did not exist or they did not own.`);
+//     }
+
+//     return res.status(200).json({
+//         success: true,
+//         message: `${result.deletedCount} notes deleted successfully.`,
+//     });
+// };
 
 const embedNote = asyncHandler(async (req, res) => {
     const { noteId } = req.params;

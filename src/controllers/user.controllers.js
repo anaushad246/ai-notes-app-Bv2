@@ -117,7 +117,8 @@ const loginUser = asyncHandler( async(req,res)=>{
 
     const options = {
         httpOnly:true,
-        secure:true
+        // secure:true
+        secure: process.env.NODE_ENV === 'production'
     }
     return res.status(200)
     .cookie("accessToken",accessToken,options)
@@ -144,7 +145,8 @@ refreshToken: undefined
     })
     const options = {
         httpOnly:true,
-        secure:true
+        // secure:true
+        secure: process.env.NODE_ENV === 'production'
     }
     return res
     .status(200)
@@ -176,7 +178,8 @@ const refreshAccessToken = asyncHandler( async(req,res)=>{
     
         const options = {
             httpOnly:true,
-            secure:true
+            // secure:true
+            secure: process.env.NODE_ENV === 'production'
         };
     
         // OLD CODE (commented out due to issues):
