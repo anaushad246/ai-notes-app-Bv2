@@ -8,8 +8,7 @@ export const verifyJWT = asyncHandler( async(req,res,next)=>{
         const accessToken = req.cookies?.accessToken || req.header("Authorization")
         ?.replace("Bearer ","")
         
-        // ✅ ADD THIS LOG
-        console.log("Backend received accessToken:", accessToken);
+        // Read token from cookie or Authorization header
         // OLD CODE (commented out due to issues):
         // if (!token) {
         //     throw new ApiError(401,"unAuthorized request")
@@ -25,18 +24,12 @@ export const verifyJWT = asyncHandler( async(req,res,next)=>{
     
        const user =  await User.findById(decodedToken?._id).select("-password -refreshToken");
        if (!user) {
-         // ✅ THIS IS THE MOST IMPORTANT LOG
-        console.log(`AUTH_DEBUG: User not found for ID: ${decodedToken?._id}`);
-        //TODO: discuss about frontend
         throw new ApiError(401,"invalid access token")
        }
        req.user = user;
-        // ✅ THIS IS THE MOST IMPORTANT LOG
-        console.log(`AUTH_DEBUG: JWT verified for user '${user.username}'. Proceeding to the next handler.`);
        next()
     } catch (error) {
-        // ✅ THIS LOG WILL CATCH ANY ERRORS (like an expired token)
-        console.error("AUTH_DEBUG: An error occurred inside verifyJWT.", error.message);
+        console.error("verifyJWT error:", error.message);
         throw new ApiError(401,error?.message || "Invalid access token")
     }
 } )

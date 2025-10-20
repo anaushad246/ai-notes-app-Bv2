@@ -2,12 +2,19 @@
 // dotenv.config({
 //   path: '../.env'
 // })
+const TRANSCRIPTION_MODEL = "openai/whisper-base";
 import { InferenceClient } from '@huggingface/inference';
 import { VoyageAIClient } from 'voyageai';
+import  axios  from 'axios';
 
 // --- Setup for AI Clients ---
 const voyageClient = new VoyageAIClient({ apiKey: "pa-jAuzCIcrm2tH-fA9ox31_TjiDVd-EwoTu4GDqVe87W0" });
 const hf = new InferenceClient(process.env.HUGGING_FACE_API_KEY);
+// const hf = new HfInference(process.env.HUGGING_FACE_API_KEY);
+// const hf = new InferenceClient({
+//   apiKey: process.env.HUGGING_FACE_API_KEY,
+//   defaultProvider: "hf-inference", // ✅ supported config key
+// });
 
 // --- Model Definitions ---
 const VOYAGE_MODEL = process.env.VOYAGE_MODEL || "voyage-lite-02-instruct";
@@ -103,4 +110,95 @@ export async function generateDocumentEmbedding(docText) {
     console.error("Full error from Voyage AI document embedding:", error);
     throw new Error("Failed to generate document embedding.");
   }
+}
+
+// // --- Add this new function to the "AI Functions" section of the file ---
+// export async function transcribeAudio(audioBuffer) {
+//   try {
+//     // Use the Hugging Face client to convert audio to text
+//     const response = await hf.automaticSpeechRecognition({
+//       model: TRANSCRIPTION_MODEL,
+//       data: audioBuffer,
+//     });
+
+//     // The transcribed text is in the 'text' property of the response
+//     return response.text;
+
+//   } catch (error) {
+//     // ✅ NEW, MORE DETAILED LOGGING
+//     console.error("--- Full Hugging Face Transcription Error ---");
+//     console.error("Error Message:", error.message);
+//     console.error("Full Error Object:", error);
+//     console.error("--- End of Error ---");
+//     throw new Error("Failed to transcribe audio.");
+//   }
+// }
+
+// Helper function to poll AssemblyAI for results
+const pollForTranscript = async (transcriptUrl, apiKey) => {
+  const headers = { 'authorization': apiKey };
+
+  while (true) {
+      try {
+          const response = await axios.get(transcriptUrl, { headers });
+          const status = response.data.status;
+
+          if (status === 'completed') {
+              return response.data.text;
+          } else if (status === 'failed') {
+              throw new Error('Transcription failed at AssemblyAI');
+          }
+          
+          // Wait for 3 seconds before polling again
+          await new Promise(resolve => setTimeout(resolve, 3000));
+
+      } catch (error) {
+          console.error("Error polling for transcript:", error.message);
+          throw new Error('Failed to get transcription status.');
+      }
+  }
+};
+
+export async function transcribeAudio(audioBuffer) {
+const apiKey = process.env.ASSEMBLYAI_API_KEY;
+if (!apiKey) {
+    throw new Error("ASSEMBLYAI_API_KEY is not set in .env file");
+}
+
+const uploadUrl = 'https://api.assemblyai.com/v2/upload';
+const transcriptUrl = 'https://api.assemblyai.com/v2/transcript';
+const headers = {
+    'authorization': apiKey,
+    'Content-Type': 'application/octet-stream'
+};
+
+try {
+  // 1. Upload the audio buffer
+  const uploadResponse = await axios.post(uploadUrl, audioBuffer, { headers });
+  const fileUrl = uploadResponse.data.upload_url;
+
+  if (!fileUrl) {
+      throw new Error("Failed to upload file to AssemblyAI.");
+  }
+
+  // 2. Request the transcription
+  const transcriptResponse = await axios.post(transcriptUrl, {
+      audio_url: fileUrl
+  }, { headers: { 'authorization': apiKey } });
+  
+  const pollUrl = `${transcriptUrl}/${transcriptResponse.data.id}`;
+
+  // 3. Poll for the result
+  const transcribedText = await pollForTranscript(pollUrl, apiKey);
+  return transcribedText;
+
+} catch (error) {
+  console.error("--- Full AssemblyAI Transcription Error ---");
+  console.error("Error Message:", error.message);
+  if (error.response) {
+      console.error("Error Data:", error.response.data);
+  }
+  console.error("--- End of Error ---");
+  throw new Error("Failed to transcribe audio.");
+}
 }

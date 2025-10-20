@@ -3,15 +3,15 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { Note } from "../models/note.model.js"; 
-// ✅ FIX: Use consistent casing for the import path
+// Use consistent casing for the import path
 import { Notebook } from "../models/notebook.model.js"; 
 import { User } from "../models/user.model.js"; 
-import { generateQueryEmbedding, generateSummary, generateAITagWithModel, generateDocumentEmbedding } from "../utils/ai.service.js"; 
+import { generateQueryEmbedding, generateSummary, generateAITagWithModel, generateDocumentEmbedding, transcribeAudio } from "../utils/ai.service.js"; 
 
 // Helper function to validate fields
 const isValidText = (field) => field?.trim() !== "" && field?.length > 0;
 
-// --- CREATE NOTE (Updated for Notebooks) ---
+// Create note (supports assigning notebook)
 const createNote = asyncHandler(async (req, res) => {
     // 1. Get data from request body (ADDED notebookId)
     const { title, content, notebookId } = req.body; 
@@ -40,9 +40,9 @@ const createNote = asyncHandler(async (req, res) => {
         .json(new ApiResponse(201, note, "Note created successfully."));
 });
 
-// --- GET NOTES FOR AUTHENTICATED USER (Updated for Filtering) ---
+// Get paginated notes for authenticated user (optional notebook filter)
 const getNotes = asyncHandler(async (req, res) => {
-    console.log("BACKEND_DEBUG: getNotes controller has been triggered!");
+    
     const userId = req.user._id;
 
     // 2. Get pagination and filter options
@@ -50,13 +50,13 @@ const getNotes = asyncHandler(async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
     
-    // ✅ NEW: Get the notebookId from query parameters
+    // Optional notebook filter
     const { notebookId } = req.query;
 
     // 3. Build the initial query object
     const query = { owner: userId };
     
-    // ✅ NEW: If notebookId is provided, add the filter logic
+    // If notebookId provided, add filter
     if (notebookId) {
         // Handle special case for 'unassigned' notes ('All Notes')
         if (notebookId.toLowerCase() === 'unassigned') {
@@ -66,14 +66,13 @@ const getNotes = asyncHandler(async (req, res) => {
             query.notebook = new mongoose.Types.ObjectId(notebookId);
         }
     }
- // ✅ ADD THIS LOG to see which user we are querying for
- console.log(`DATABASE_QUERY: Searching for notes with owner ID: ${userId}`);
+    
     // 4. Query notes with pagination and sorting
     const notes = await Note.find(query) 
         .sort({ createdAt: -1 }) 
         .skip(skip)               
         .limit(limit);            
-        console.log(`DATABASE_RESULT: Found ${notes.length} notes for this user.`);
+        
     // 5. Get the total count of notes for the user, matching the current filter
     const totalNotes = await Note.countDocuments(query); 
 
@@ -90,10 +89,10 @@ const getNotes = asyncHandler(async (req, res) => {
 });
 
 
-// --- UPDATE NOTE (Updated for Moving Notes) ---
+// Update note (also supports moving across notebooks)
 const updateNote = asyncHandler(async (req, res) => {
     const { noteId } = req.params;
-    // 👇 CHANGED: ADDED notebookId to capture the new folder assignment
+    
     const { title, content, notebookId } = req.body; 
 
     // 1. Validation
@@ -112,7 +111,7 @@ const updateNote = asyncHandler(async (req, res) => {
     if (title) note.title = title;
     if (content) note.content = content;
     
-    // 👇 NEW LOGIC: Handle moving the note to a different notebook
+    // Handle moving the note to a different notebook
     if (notebookId !== undefined) {
         // If the value is explicitly 'null' (sent from frontend for 'All Notes'/unassigned), set notebook to null.
         // Otherwise, cast the ID to a Mongoose ObjectId.
@@ -129,8 +128,7 @@ const updateNote = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, note, "Note updated successfully."));
 });
 
-// --- DELETE NOTE ---
-// ✅ WRAP THIS FUNCTION WITH asyncHandler
+// Delete single note
 const deleteNote = asyncHandler(async (req, res) => {
     const { noteId } = req.params;
     const userId = req.user?._id;
@@ -146,7 +144,7 @@ const deleteNote = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, {}, "Note deleted successfully."));
 });
 
-// ✅ WRAP THIS FUNCTION WITH asyncHandler
+// Delete multiple notes
 const deleteMultipleNotes = asyncHandler(async (req, res) => {
     const { noteIds } = req.body;
     const userId = req.user?._id;
@@ -168,7 +166,7 @@ const deleteMultipleNotes = asyncHandler(async (req, res) => {
 });
 
 
-// // --- DELETE NOTE ---
+// Deprecated alternative implementations retained for reference
 // const deleteNote = async (req, res) => {
 //     const { noteId } = req.params;
 //     const userId = req.user?._id;
@@ -238,7 +236,7 @@ const searchNotes = asyncHandler(async (req, res) => {
     // 1. Get the user's search query from the query parameter (e.g., ?query=...)
     const { query } = req.query; 
     const userId = req.user._id; 
-    console.log(`Backend received search request for query: "${query}"`);
+    
     if (!query) {
         throw new ApiError(400, "Search query is required.");
     }
@@ -248,20 +246,20 @@ const searchNotes = asyncHandler(async (req, res) => {
 
     // 3. Perform Vector Search using MongoDB Aggregation
     const notes = await Note.aggregate([
-        // Stage 1: $vectorSearch MUST be the first stage
+        // Stage 1: $vectorSearch must be first
         {
             $vectorSearch: {
-                // ⚠️ CRITICAL: Replace "vector_index_name" with your actual Atlas Vector Search index name.
+                // Use your Atlas Vector Search index name.
                 index: "vector_index",
                 path: "embedding",
                 queryVector: queryVector,
                 numCandidates: 100,
                 limit: 10,
-                // SOLUTION: Use 'filter' to apply the ownership check
+                // Apply ownership filter
                 filter: { owner: userId } 
             }
         },
-        // Stage 2: Projection (To get only the desired fields)
+        // Stage 2: Projection (select desired fields)
         {
             $project: {
                 title: 1,
@@ -271,12 +269,12 @@ const searchNotes = asyncHandler(async (req, res) => {
             }
         }
     ]);
-    console.log("Notes found by vector search:", JSON.stringify(notes, null, 2));
+    
     // 4. Send response (This is now correctly inside the function scope)
     return res
         .status(200)
         .json(new ApiResponse(200, notes, "Search results fetched successfully."));
-        // console.log(`Backend sent search results: ${JSON.stringify(notes, null, 2)}`);
+        
 });
 
 const summarizeNote = asyncHandler(async (req, res) => {
@@ -286,7 +284,7 @@ const summarizeNote = asyncHandler(async (req, res) => {
         throw new ApiError(404, "Note not found or you are not the owner.");
     }
     
-// --- THIS IS THE FIX ---
+// Summarize: strip HTML before sending to model
     // 1. Create a clean, plain-text version of the content by removing HTML tags.
     const plainTextContent = note.content.replace(/<[^>]*>?/gm, ' ');
 
@@ -320,6 +318,64 @@ const retagNote = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, note, "Note re-tagged successfully."));
 });
 
+// --- Add this new function to the file (e.g., after retagNote) ---
+const transcribeAndSummarize = asyncHandler(async (req, res) => {
+    console.log('=== Transcribe & Summarize Started ===');
+    console.log('Content-Type:', req.headers['content-type']);
+    console.log('Has file:', !!req.file);
+    
+    try {
+        // Check if file was uploaded
+        if (!req.file || !req.file.buffer) {
+            console.error('❌ No audio file found');
+            throw new ApiError(400, "No audio file was uploaded.");
+        }
+
+        console.log('✅ File received:', {
+            originalname: req.file.originalname,
+            mimetype: req.file.mimetype,
+            size: req.file.size
+        });
+
+        if (req.file.buffer.length === 0) {
+            console.error('❌ Audio buffer is empty');
+            throw new ApiError(400, "Audio file is empty.");
+        }
+
+        console.log('✅ Audio buffer ready, size:', req.file.buffer.length);
+
+        // Transcribe
+        console.log('📝 Starting transcription...');
+        const transcribedText = await transcribeAudio(req.file.buffer);
+        console.log('✅ Transcription complete. Length:', transcribedText?.length);
+        
+        if (!transcribedText || transcribedText.trim() === "") {
+            console.error('❌ Transcription returned empty text');
+            throw new ApiError(500, "Failed to transcribe audio or the audio was empty.");
+        }
+
+        // Summarize
+        console.log('📄 Starting summarization...');
+        const summary = await generateSummary(transcribedText);
+        console.log('✅ Summarization complete');
+        
+        if (!summary) {
+            console.error('❌ Summarization failed');
+            throw new ApiError(500, "Failed to generate summary from the transcribed text.");
+        }
+
+        console.log('✅ === Process Complete ===');
+
+        return res.status(200).json(new ApiResponse(200, { summary: summary }, "Audio processed successfully."));
+        
+    } catch (error) {
+        console.error('❌ === BACKEND ERROR ===');
+        console.error('Error:', error.message);
+        console.error('Stack:', error.stack);
+        throw error;
+    }
+});
+
 export {
     createNote,
     getNotes,
@@ -329,6 +385,7 @@ export {
     deleteMultipleNotes,
     searchNotes,
     summarizeNote,
-    retagNote
+    retagNote,
+    transcribeAndSummarize
     
 };

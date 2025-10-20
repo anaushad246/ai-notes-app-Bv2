@@ -1,4 +1,6 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
+import { OAuth2Client } from 'google-auth-library';
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 import { ApiError } from "../utils/ApiError.js";
 import { User } from '../models/user.model.js';
 // import { uploadOnCloudinary } from "../utils/cloudinary.js";
@@ -277,6 +279,62 @@ const updateAccountDetails = asyncHandler( async(req,res)=>{
     .json( new ApiResponse(200,user,"Account details updated successfully") )
 });
 
+ const verifyGoogleTokenAndLogin = asyncHandler(async (req, res) => {
+    const { idToken } = req.body;
+
+    if (!idToken) {
+        throw new ApiError(400, "Google ID Token is required");
+    }
+
+    const ticket = await client.verifyIdToken({
+        idToken,
+        audience: process.env.GOOGLE_CLIENT_ID,
+    });
+
+    const { name, email, sub: googleId } = ticket.getPayload();
+
+    let user = await User.findOne({ googleId });
+
+    if (!user) {
+        // If no user with that googleId, check if one exists with the same email
+        user = await User.findOne({ email });
+        if (user) {
+            // Link the googleId to the existing account
+            user.googleId = googleId;
+            await user.save({ validateBeforeSave: false });
+        } else {
+            // If no user found, create a new one
+            user = await User.create({
+                googleId,
+                email,
+                fullname: name,
+                username: email.split('@')[0] + Math.floor(Math.random() * 1000), // Random username
+            });
+        }
+    }
+
+    // Now that we have a user, generate our app's tokens
+    const { accessToken, refreshToken } = await generateAccessAndRefreshToken(user._id);
+
+    const options = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production'
+    };
+
+    const loggedInUser = await User.findById(user._id).select("-password -refreshToken");
+
+    return res.status(200)
+        .cookie("accessToken", accessToken, options)
+        .cookie("refreshToken", refreshToken, options)
+        .json(
+            new ApiResponse(200, {
+                user: loggedInUser,
+                accessToken,
+                refreshToken
+            }, "User logged in successfully")
+        );
+});
+
 // const updateUserAvatar = asyncHandler( async(req,res)=>{
 // const avatarLocalPath = req.file?.path;
 // if (!avatarLocalPath) {
@@ -336,6 +394,8 @@ export {
     changeCurrentPassword,
     getCurrentUser,
     updateAccountDetails,
+    verifyGoogleTokenAndLogin,
+    generateAccessAndRefreshToken,
     // updateUserAvatar,
     // updateUserCoverImage
 };

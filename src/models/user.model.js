@@ -25,6 +25,12 @@ const userSchema = new Schema(
             lowercase:true,
             trim:true,
             index:true
+        },googleId: { // <-- ADD THIS FIELD
+            type: String,
+        },
+        password: {
+            type: String,
+            // required: [true, 'Password is required'] // <-- CHANGE THIS LINE
         },
     //    avatar :{
     //         type:String, //cloudinary link
@@ -38,10 +44,10 @@ const userSchema = new Schema(
     //         type:Schema.Types.ObjectId,
     //         ref:"Video"
     //     }],
-        password:{
-            type:String,
-            required:[true, 'Password is required']
-        },
+        // password:{
+        //     type:String,
+        //     required:[true, 'Password is required']
+        // },
         refreshToken:{
             type:String
         }
